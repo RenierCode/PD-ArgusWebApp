@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Frontend: reinstall with `npm install`, rebuild with `npm run build`
+frontend/node_modules/
+frontend/dist/
+
+# Runtime data, specific to each Pi
+database.db
+database.db-shm
+database.db-wal
+reports/
+
+# Anomaly-test data backup and change record (local only)
+testing/anomaly_test_backup.db
+testing/anomaly_test_manifest.json*
+
+# Editors / OS
+.vscode/
+.DS_Store
