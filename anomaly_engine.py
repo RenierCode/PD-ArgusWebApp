@@ -768,7 +768,7 @@ ML_ALERT_QUIET_SECONDS = 5 * 60
 # discharge (reset by the Arduino after 60 s without flow). When the flow stops after at least
 # BATCH_DISCHARGE_LITRES went out, the batch has left: the ML forgets that node's history and
 # warms up on the next water (min_history readings; the threshold rules stay active throughout).
-BATCH_DISCHARGE_LITRES = float(os.environ.get("ARGUS_BATCH_DISCHARGE_LITRES", "5.0"))
+BATCH_DISCHARGE_LITRES = float(os.environ.get("ARGUS_BATCH_DISCHARGE_LITRES", "10.0"))
 _discharged: dict[int, float] = {}    # node_id -> litres out so far in the current discharge
 
 
@@ -807,11 +807,11 @@ def threshold_dss(ph, temp, turbidity, level, flow, limits, rule_alerts):
 
 def alert_title(rule_alerts) -> str:
     """One threshold alert keeps its own title; several name their sensors, e.g.
-    "Multiple Anomaly Conditions: pH, Turbidity, Water Level"."""
+    "Threshold breach: pH, Turbidity, Water Level"."""
     if len(rule_alerts) == 1:
         return rule_alerts[0][1]
     names = [PARAM_NAMES.get(key, key) for key in dict.fromkeys(key for key, _, _ in rule_alerts)]
-    return f"Multiple Anomaly Conditions: {', '.join(names)}"
+    return f"Threshold breach: {', '.join(names)}"
 
 
 def handle_data(conn, models, radio, fields):

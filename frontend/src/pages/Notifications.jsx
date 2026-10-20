@@ -8,8 +8,8 @@ import { formatDbTime } from '../time.js'
 
 const TYPE_OPTIONS = [
   { value: 'all', label: 'All alerts' },
-  { value: 'threshold', label: 'Threshold alerts' },
-  { value: 'ml', label: 'ML anomaly alerts' },
+  { value: 'threshold', label: 'Threshold breach' },
+  { value: 'ml', label: 'Anomaly' },
 ]
 
 // Values match the server's NOTIFICATION_PARAMS keys
@@ -89,14 +89,14 @@ export default function Notifications({ nodes, focus }) {
           <div className="font-bold text-accentDeep text-base">Decision Support System</div>
           <button type="button" onClick={() => setGuideOpen(true)}
             className="px-3 py-1 border border-accentDeep text-accentDeep rounded-md text-xs hover:bg-accentDeep hover:text-white">
-            DSS Guide
+            Alert Guide
           </button>
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-dark2">
-          <div>Active: <b className="text-dark">{counts?.active ?? '—'}</b></div>
+          <div>Open alerts: <b className="text-dark">{counts?.active ?? '—'}</b></div>
           <div>
-            Threshold: <b style={{ color: MARK_COLORS.threshold }}>{counts?.threshold ?? '—'}</b>
-            {' '}· ML anomaly: <b style={{ color: MARK_COLORS.model }}>{counts?.ml ?? '—'}</b>
+            Threshold breach: <b style={{ color: MARK_COLORS.threshold }}>{counts?.threshold ?? '—'}</b>
+            {' '}· Anomaly: <b style={{ color: MARK_COLORS.model }}>{counts?.ml ?? '—'}</b>
           </div>
           <div>Latest: {counts?.latest_timestamp ? formatDbTime(counts.latest_timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—'}</div>
         </div>
@@ -104,7 +104,7 @@ export default function Notifications({ nodes, focus }) {
 
       <div ref={listTop} className="flex flex-wrap items-center gap-2.5 mb-4 scroll-mt-4">
         <select className={SELECT} aria-label="Node" value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}>
-          <option value="all">Overall (all nodes)</option>
+          <option value="all">All nodes</option>
           {nodes.map((n) => <option key={n.node_id} value={n.node_id}>{n.label}</option>)}
         </select>
         <select className={SELECT} aria-label="Alert type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>

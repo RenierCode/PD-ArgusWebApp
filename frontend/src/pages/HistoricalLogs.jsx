@@ -13,12 +13,12 @@ export const FLAG_OPTIONS = [
   { value: 'all', label: 'All Readings' },
   { value: 'none', label: 'No Alerts' },
   { value: 'flagged', label: 'With Alerts only' },
-  { value: 'threshold', label: 'Threshold Alerts' },
-  { value: 'ml', label: 'ML Anomaly' },
+  { value: 'threshold', label: 'Threshold breach' },
+  { value: 'ml', label: 'Anomaly' },
 ]
 
 const SELECT = 'p-2 border border-border rounded-md text-sm bg-white'
-const COLUMNS = ['Node', 'Timestamp', 'pH', 'Turbidity', 'Temp', 'Level %', 'Flow', 'Int. Vol', 'Flagged by']
+const COLUMNS = ['Node', 'Time', 'pH', 'Turbidity (NTU)', 'Temp (°C)', 'Water level (%)', 'Flow (L/min)', 'Volume (L)', 'Alert']
 
 export default function HistoricalLogs({ nodes, liveByNode }) {
   const [nodeFilter, setNodeFilter] = useState('all')
@@ -82,7 +82,7 @@ export default function HistoricalLogs({ nodes, liveByNode }) {
   return (
     <div>
       <div className="bg-white border border-border rounded-lg px-5 py-3.5 mb-5 font-bold text-accentDeep">
-        Historical Logs — telemetry_logs
+        Historical Logs
       </div>
 
       <div className="bg-white border border-border rounded-lg p-4">
@@ -91,11 +91,11 @@ export default function HistoricalLogs({ nodes, liveByNode }) {
             className={SELECT} aria-label="Node" value={nodeFilter}
             onChange={(e) => { setNodeFilter(e.target.value); setPage(1) }}
           >
-            <option value="all">Overall (all nodes)</option>
+            <option value="all">All nodes</option>
             {nodes.map((n) => <option key={n.node_id} value={n.node_id}>{n.label}</option>)}
           </select>
           <select
-            className={SELECT} aria-label="Flagged by" value={flagFilter}
+            className={SELECT} aria-label="Alert type" value={flagFilter}
             onChange={(e) => { setFlagFilter(e.target.value); setPage(1) }}
           >
             {FLAG_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -106,10 +106,10 @@ export default function HistoricalLogs({ nodes, liveByNode }) {
             onChange={(e) => { setEnd(e.target.value); setPage(1) }} />
           <label className="text-sm flex items-center gap-1.5">
             <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-            Auto-refresh
+            Update automatically
           </label>
           <button className="ml-auto px-4 py-1.5 border border-accentDeep text-accentDeep rounded-md text-sm bg-white disabled:opacity-50" onClick={exportCsv} disabled={exporting}>
-            {exporting ? 'Exporting…' : 'Export CSV Data'}
+            {exporting ? 'Exporting…' : 'Export to spreadsheet (CSV)'}
           </button>
         </div>
 

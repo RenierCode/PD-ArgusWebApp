@@ -63,9 +63,9 @@ function alertDetails(n, nodeLabel, skipped) {
   return h('div', { className: 'mt-1 space-y-0.5' },
     row('Node', h('b', { className: 'text-dark font-semibold' }, nodeLabel)),
     row('Timestamp', formatDbTime(n.timestamp)),
-    row('Flagged by', h('span', { className: 'flex flex-wrap gap-1' },
-      n.is_threshold ? h(Badge, { kind: 'threshold' }, 'Threshold') : null,
-      n.is_anomaly ? h(Badge, { kind: 'model' }, 'ML model') : null)),
+    row('Type', h('span', { className: 'flex flex-wrap gap-1' },
+      n.is_threshold ? h(Badge, { kind: 'threshold' }, 'Threshold breach') : null,
+      n.is_anomaly ? h(Badge, { kind: 'model' }, 'Anomaly') : null)),
     // ML alerts are titled by their sensors; the DSS diagnosis ("Possible plant-wide upset: ...") goes here
     n.is_anomaly && n.dss ? row('Diagnosis', h('span', { className: 'text-dark' }, n.title)) : null,
     skipped > 0 ? h('div', { className: 'text-dark2 pt-0.5' }, `+${skipped} earlier alert${skipped > 1 ? 's' : ''} not shown`) : null,

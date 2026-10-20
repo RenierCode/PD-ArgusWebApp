@@ -18,3 +18,12 @@ export function localDateToDb(date, endOfDay = false) {
   const local = new Date(`${date}T${endOfDay ? '23:59:59' : '00:00:00'}`)
   return local.toISOString().slice(0, 19).replace('T', ' ')
 }
+
+// How long ago, for people: "45 s", "12 min", "5 h", "10 days"
+export function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 90) return `${s} s`
+  if (s < 90 * 60) return `${Math.round(s / 60)} min`
+  if (s < 48 * 3600) return `${Math.round(s / 3600)} h`
+  return `${Math.round(s / 86400)} days`
+}

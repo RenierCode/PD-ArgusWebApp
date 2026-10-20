@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import Sidebar from './components/Sidebar.jsx'
+import Sidebar, { NAV_ITEMS, SYSTEM_ITEMS } from './components/Sidebar.jsx'
+import { Menu } from 'lucide-react'
+import logo from './assets/logo.svg'
+import { useIsMobile } from './hooks/useIsMobile.js'
 import Dashboard from './pages/Dashboard.jsx'
 import Notifications from './pages/Notifications.jsx'
 import HistoricalLogs from './pages/HistoricalLogs.jsx'
@@ -13,7 +16,9 @@ import { formatDbTime } from './time.js'
 import { useToastCompact } from './components/Toasts.jsx'
 
 export default function App() {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)      // sidebar starts closed (icons only); ☰ opens it
+  const isMobile = useIsMobile()                       // phone: top bar + slide-in menu
+  const [menuOpen, setMenuOpen] = useState(false)
   const [view, setView] = useState('dashboard')
   const [nodes, setNodes] = useState([])
   const [nodeContext, setNodeContext] = useState('1')
@@ -164,8 +169,22 @@ export default function App() {
         view={view} setView={setView}
         nodes={nodes} nodeContext={nodeContext} setNodeContext={setNodeContext}
         diagnostics={diagnostics} nodeStatus={nodeStatus}
+        isMobile={isMobile} mobileOpen={menuOpen} onMobileClose={() => setMenuOpen(false)}
       />
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 min-w-0 flex flex-col">
+      {isMobile && (
+        <div className="flex items-center gap-3 bg-dark text-white px-3 py-2.5 flex-shrink-0">
+          <button type="button" onClick={() => setMenuOpen(true)} aria-label="Open menu" className="p-1.5 -ml-1">
+            <Menu size={22} />
+          </button>
+          <img src={logo} alt="" className="w-6 h-6 object-contain" />
+          <span className="font-extrabold tracking-wider text-sm">ARGUS</span>
+          <span className="text-slate-300 text-sm truncate">
+            · {[...NAV_ITEMS, ...SYSTEM_ITEMS].find((i) => i.key === view)?.label}
+          </span>
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto p-3 md:p-6">
         {clockNotice && (
           <div className="flex items-start justify-between gap-3 bg-sky-50 border border-accentSky text-dark rounded-lg px-4 py-2.5 mb-4 text-sm"
             role="status">
@@ -188,6 +207,7 @@ export default function App() {
         {/* {view === 'admin' && <Admin nodes={nodes} refreshNodes={refreshNodes} />} */}
         {view === 'about' && <About />}
         {view === 'preferences' && <Preferences />}
+      </div>
       </div>
     </div>
   )

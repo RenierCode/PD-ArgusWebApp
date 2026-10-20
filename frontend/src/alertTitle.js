@@ -11,19 +11,21 @@ export function sensorNames(params) {
 
 /**
  * The pop-up toast's title. An ML alert with a DSS diagnosis is titled by its sensors
- * ("ML Anomaly: pH, Temperature, Turbidity"); the diagnosis goes in the toast's description.
+ * ("Anomaly: pH, Temperature, Turbidity"); the diagnosis goes in the toast's description.
  */
 export function toastTitle(n) {
   const names = sensorNames(n.params)
-  if (n.is_anomaly && n.dss && names.length) return `ML Anomaly: ${names.join(', ')}`
+  if (n.is_anomaly && n.dss && names.length) return `Anomaly: ${names.join(', ')}`
   return alertTitle(n)
 }
 
 export function alertTitle(n) {
   const title = n.title || ''
-  if (/^Multiple Anomaly Conditions Detected \(\d+\)$/.test(title) && n.params) {
+  // Several limits crossed at once: "Threshold breach: pH, Turbidity" (older alerts read "Multiple
+  // Anomaly Conditions Detected (3)" or "Multiple Anomaly Conditions: ...")
+  if (/^Multiple Anomaly Conditions/.test(title) && n.params) {
     const names = n.params.split(',').filter(Boolean).map((p) => PARAM_NAMES[p] || p)
-    if (names.length) return `Multiple Anomaly Conditions: ${names.join(', ')}`
+    if (names.length) return `Threshold breach: ${names.join(', ')}`
   }
   return title
 }

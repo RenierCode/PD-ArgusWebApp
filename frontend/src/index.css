@@ -164,3 +164,9 @@ button, select, input {
 @media (prefers-reduced-motion: reduce) {
   .toast-item { animation: none; transition: none; }
 }
+
+/* Grid cells may shrink below their content's natural width (charts, long text), so a one-column
+   phone layout never grows wider than the screen */
+.grid > * {
+  min-width: 0;
+}

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { TankGauge, TachoGauge } from '../components/Gauges.jsx'
 import TelemetryChart, { MarkSwatch } from '../components/TelemetryChart.jsx'
 import { api } from '../api.js'
-import { localDateToDb } from '../time.js'
+import { formatDuration, localDateToDb } from '../time.js'
+import { useIsMobile } from '../hooks/useIsMobile.js'
 
 export default function Dashboard({ nodeContext, nodes, liveByNode, thresholdsByNode, nodeStatus, onExpandedChange, onOpenNode }) {
   if (nodeContext === 'all') {
@@ -21,7 +22,17 @@ const INLINE_RANGE = '1h'   // fixed underlying fetch window for the compact vie
 const MAX_INLINE_POINTS = 50
 
 function NodeDashboard({ nodeId, nodes, live, limits, status, onExpandedChange }) {
-  const [showMarks, setShowMarks] = useState({ threshold: true, model: true })
+  // Which alert markers the charts show; remembered by this screen across restarts and power-offs
+  const [showMarks, setShowMarks] = useState(() => {
+    try {
+      return { threshold: true, model: true, ...JSON.parse(localStorage.getItem('argus-chart-markers') || '{}') }
+    } catch {
+      return { threshold: true, model: true }
+    }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('argus-chart-markers', JSON.stringify(showMarks)) } catch { /* private mode */ }
+  }, [showMarks])
   const [history, setHistory] = useState([])
   const [now, setNow] = useState(new Date())
   const [expandedField, setExpandedField] = useState(null)   // null | 'ph' | 'turbidity' | 'temperature'
@@ -73,7 +84,7 @@ function NodeDashboard({ nodeId, nodes, live, limits, status, onExpandedChange }
         offlineFor={status?.seconds_since_last_reading == null ? null
           : status.seconds_since_last_reading + (now - status.receivedAt) / 1000} />
 
-      <div className="grid grid-cols-3 gap-4 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4 mb-5">
         <Card title="Fluid Level Tracker">
           <TankGauge level={latest.water_level} minLevel={limits.min_level} maxLevel={limits.max_level} />
         </Card>
@@ -93,14 +104,14 @@ function NodeDashboard({ nodeId, nodes, live, limits, status, onExpandedChange }
 
       <div className="bg-white border border-border rounded-lg p-4">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Flagged points to show">
-            <span className="text-xs uppercase tracking-wide text-dark2 mr-1">Flagged by</span>
-            <MarkToggle kind="threshold" label="Threshold" on={showMarks.threshold}
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Alert markers to show on the charts">
+            <span className="text-xs uppercase tracking-wide text-dark2 mr-1">Show on charts</span>
+            <MarkToggle kind="threshold" label="Threshold breach" on={showMarks.threshold}
               onClick={() => setShowMarks((m) => ({ ...m, threshold: !m.threshold }))} />
-            <MarkToggle kind="model" label="ML model" on={showMarks.model}
+            <MarkToggle kind="model" label="Anomaly" on={showMarks.model}
               onClick={() => setShowMarks((m) => ({ ...m, model: !m.model }))} />
           </div>
-          <div className="text-xs text-dark2">Click a chart to expand it and choose a time range</div>
+          <div className="text-xs text-dark2">Tap a chart to enlarge it and pick a time range</div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <ClickableChart onExpand={() => setExpandedField('ph')}>
@@ -163,6 +174,7 @@ const todayLocal = () => {
 }
 
 function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose }) {
+  const isMobile = useIsMobile()
   const [range, setRange] = useState('1h')          // '1h' | '6h' | '24h' | 'dates'
   const [fromDate, setFromDate] = useState(todayLocal)
   const [toDate, setToDate] = useState(todayLocal)
@@ -215,12 +227,12 @@ function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose })
       role="dialog" aria-modal="true" aria-label={`${meta.label} expanded chart`}
     >
       <div
-        className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-full overflow-y-auto p-5"
+        className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-full overflow-y-auto p-3 md:p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <h2 className="text-lg font-bold text-dark">{meta.label}</h2>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <div className="flex gap-1.5">
               {['1h', '6h', '24h', 'dates'].map((r) => (
                 <button
@@ -258,8 +270,8 @@ function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose })
         ) : loading && history.length === 0 ? (
           <div className="h-[480px] flex items-center justify-center text-sm text-dark2">Loading…</div>
         ) : (
-          <TelemetryChart
-            rows={history} field={field} limits={limits} show={showMarks} height={480}
+          <TelemetryChart key={`${range}|${fromDate}|${toDate}`}
+            rows={history} field={field} limits={limits} show={showMarks} height={isMobile ? 300 : 480} zoomable
             label={meta.label} unit={meta.unit} decimals={meta.decimals} clamp={meta.clamp}
             baseline={baselines[field]}
           />
@@ -297,7 +309,7 @@ function AllNodesGrid({ nodes, liveByNode, nodeStatus, onOpenNode }) {
                   <div>Temp <b className="text-dark">{latest.temperature}°C</b></div>
                   <div>Level <b className="text-dark">{latest.water_level}%</b></div>
                   <div>Flow <b className="text-dark">{latest.flowrate} L/min</b></div>
-                  <div>Status <b className="text-dark">{latest.is_anomaly ? 'Anomaly' : 'Nominal'}</b></div>
+                  <div>Status <b className="text-dark">{latest.is_anomaly ? 'Alert' : 'Normal'}</b></div>
                 </div>
               ) : (
                 <div className="text-sm text-dark2">Waiting for telemetry…</div>
@@ -313,15 +325,15 @@ function AllNodesGrid({ nodes, liveByNode, nodeStatus, onOpenNode }) {
 
 function Ribbon({ nodeLabel, now, online, offlineFor }) {
   return (
-    <div className="flex justify-between items-center bg-white border border-border rounded-lg px-5 py-3.5 mb-5">
+    <div className="flex flex-wrap justify-between items-center gap-x-4 gap-y-1 bg-white border border-border rounded-lg px-4 md:px-5 py-3 md:py-3.5 mb-4 md:mb-5">
       <div className="font-bold text-accentDeep text-base">{nodeLabel}</div>
-      <div className="flex items-center gap-5 text-sm text-dark2">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-dark2">
         <div>{now.toLocaleTimeString()}</div>
         <div className="flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${online ? 'bg-accentSky animate-pulse' : 'bg-alert'}`} />
-          {online ? 'Live data stream active'
-            : offlineFor != null ? `No packets received in ${Math.round(offlineFor)}s`
-            : 'Waiting for first packet'}
+          {online ? 'Receiving live data'
+            : offlineFor != null ? `No data for ${formatDuration(offlineFor)}`
+            : 'Waiting for the first reading'}
         </div>
       </div>
     </div>

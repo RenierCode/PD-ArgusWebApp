@@ -543,18 +543,18 @@ def _guide_entry(group, name, trigger, rule, sensors, severity=None):
 
 def guide_entries() -> list:
     entries = [
-        _guide_entry("Threshold limits", g["label"],
+        _guide_entry("Threshold breach (limits crossed)", g["label"],
                      f"The {_PARAM_NAME[param]} reading is {_NEED_TEXT[direction]}.", g, [param])
         for (param, direction), g in THRESHOLD_GUIDANCE.items()
     ]
     for rule in RULES.values():
         parts = [f"{_PARAM_NAME[s]} {_NEED_TEXT[d]}" for s, d in rule["needs"].items()]
         entries.append(_guide_entry(
-            "ML diagnoses", rule["title"],
-            f"The ML models flag these at the same moment: {'; '.join(parts)}.", rule, rule["needs"], rule["severity"]))
+            "Anomaly (unusual changes)", rule["title"],
+            f"Unusual changes at the same moment: {'; '.join(parts)}.", rule, rule["needs"], rule["severity"]))
     for sensor, rule in SINGLE_RULES.items():
         entries.append(_guide_entry(
-            "ML diagnoses", rule["title"],
-            f"The ML model flags an unusual {_PARAM_NAME[sensor]} change that no combined diagnosis explains.",
+            "Anomaly (unusual changes)", rule["title"],
+            f"An unusual {_PARAM_NAME[sensor]} change on its own.",
             rule, [sensor], rule["severity"]))
     return entries

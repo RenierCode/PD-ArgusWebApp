@@ -33,12 +33,12 @@ export default function DssGuide({ onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}
-      role="dialog" aria-modal="true" aria-label="DSS Guide">
+      role="dialog" aria-modal="true" aria-label="Alert Guide">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-full max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 p-5 border-b border-border">
           <div>
-            <div className="text-lg font-bold text-accentDeep">DSS Guide</div>
+            <div className="text-lg font-bold text-accentDeep">Alert Guide</div>
             <div className="text-xs text-dark2">
               Every condition the system alerts on, with its most common reasons, possible impact and
               recommended actions. Tap a [number] for a QR code of the source.

@@ -1,24 +1,37 @@
 import { Menu, Gauge, Bell, Database, FileText, Settings, Info, Accessibility } from 'lucide-react'
 import logo from '../assets/logo.svg'
 import ShutdownButton from './ShutdownButton.jsx'
+import { formatDuration } from '../time.js'
 
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { key: 'dashboard', icon: Gauge, label: 'Main Dashboard' },
   { key: 'notifications', icon: Bell, label: 'Alerts' },
   { key: 'history', icon: Database, label: 'Historical Logs' },
   { key: 'reports', icon: FileText, label: 'Reports' },
 ]
-const SYSTEM_ITEMS = [
+export const SYSTEM_ITEMS = [
   //{ key: 'admin', icon: Settings, label: 'Admin & Thresholds' },
   { key: 'about', icon: Info, label: 'About ARGUS' },
   { key: 'preferences', icon: Accessibility, label: 'Preferences & Accessibility' },
 ]
 
-export default function Sidebar({ collapsed, setCollapsed, view, setView, nodes, nodeContext, setNodeContext, diagnostics, nodeStatus }) {
+export default function Sidebar({ collapsed: collapsedSetting, setCollapsed, view, setView: selectView, nodes, nodeContext, setNodeContext, diagnostics, nodeStatus,
+  isMobile = false, mobileOpen = false, onMobileClose }) {
+  // On a phone the sidebar is a slide-in drawer: always full width, closed after picking a page
+  const collapsed = isMobile ? false : collapsedSetting
+  const setView = (key) => { selectView(key); if (isMobile) onMobileClose?.() }
   return (
+    <>
+    {isMobile && mobileOpen && (
+      <div className="fixed inset-0 z-40 bg-black/40" onClick={onMobileClose} aria-hidden="true" />
+    )}
     <div
-      className="h-full flex flex-col bg-dark text-white flex-shrink-0 transition-[width] duration-200"
+      className={isMobile
+        ? `fixed inset-y-0 left-0 z-50 h-full flex flex-col bg-dark text-white shadow-xl transition-transform duration-200 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'}`
+        : 'h-full flex flex-col bg-dark text-white flex-shrink-0 transition-[width] duration-200'}
       style={{ width: collapsed ? 64 : 260 }}
+      aria-hidden={isMobile && !mobileOpen ? 'true' : undefined}
     >
       <div className="flex items-center justify-between p-4 border-b border-slate-800">
         {!collapsed && (
@@ -27,7 +40,8 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, nodes,
             ARGUS
           </div>
         )}
-        <button className="text-white" onClick={() => setCollapsed(!collapsed)} aria-label="Toggle navigation">
+        <button className="text-white p-1" onClick={() => (isMobile ? onMobileClose?.() : setCollapsed(!collapsed))}
+          aria-label={isMobile ? 'Close menu' : 'Toggle navigation'}>
           <Menu size={20} />
         </button>
       </div>
@@ -35,7 +49,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, nodes,
       {/* Only worth choosing between nodes once there is more than one */}
       {!collapsed && nodes.length > 1 && (
         <div className="p-3 border-b border-slate-800">
-          <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">Context</div>
+          <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">Showing</div>
           <select
             className="w-full p-2 rounded-md border border-slate-700 bg-slate-800 text-white text-sm"
             value={nodeContext}
@@ -73,17 +87,18 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, nodes,
                   className="inline-block w-2 h-2 rounded-full mr-1.5"
                   style={{ background: online ? '#22c55e' : '#DC2626' }}
                 />
-                {n.label}: {online ? 'Online' : status ? `Offline (${Math.round(status.seconds_since_last_reading)}s ago)` : 'Checking…'}
+                {n.label}: {online ? 'Online' : status ? `Offline (last data ${formatDuration(status.seconds_since_last_reading)} ago)` : 'Checking…'}
               </div>
             )
           })}
           <div>
             <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5" />
-            SQLite: {diagnostics ? 'Connected' : 'Checking…'}
+            Database: {diagnostics ? 'Connected' : 'Checking…'}
           </div>
         </div>
       )}
     </div>
+    </>
   )
 }
 

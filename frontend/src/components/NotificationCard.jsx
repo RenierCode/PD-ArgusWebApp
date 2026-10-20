@@ -22,8 +22,8 @@ export default function NotificationCard({ n, nodeLabel, onAcknowledge, highligh
     >
       <div className="flex flex-wrap justify-between items-center gap-2 mb-1.5">
         <div className="flex flex-wrap items-center gap-2">
-          {isThreshold && <Badge kind="threshold">THRESHOLD</Badge>}
-          {isAnomaly && <Badge kind="model">ML ANOMALY</Badge>}
+          {isThreshold && <Badge kind="threshold">THRESHOLD BREACH</Badge>}
+          {isAnomaly && <Badge kind="model">ANOMALY</Badge>}
           {severity && (
             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap"
               style={{ color: severity.color, borderColor: severity.color, background: severity.background }}>

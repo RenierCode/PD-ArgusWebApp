@@ -48,16 +48,16 @@ export default function Reports({ nodes }) {
       </div>
 
       <div className="bg-white border border-border rounded-lg p-5">
-        <div className="grid grid-cols-2 gap-4 max-w-xl">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
           <Field label="Node">
             <select className="w-full p-2.5 border border-border rounded-md text-sm" value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
               {nodes.map((n) => <option key={n.node_id} value={n.node_id}>{n.label}</option>)}
             </select>
           </Field>
-          <Field label="Report Scope">
+          <Field label="Report type">
             <select className="w-full p-2.5 border border-border rounded-md text-sm" value={reportType} onChange={(e) => setReportType(e.target.value)}>
-              <option>Full Audit</option>
-              <option>Anomaly Log Only</option>
+              <option value="Full Audit">Full report (all readings)</option>
+              <option value="Anomaly Log Only">Alerts only (readings with an alert)</option>
             </select>
           </Field>
           <Field label="Start Date">
@@ -80,7 +80,7 @@ export default function Reports({ nodes }) {
 
         {result && (
           <>
-            <div className="grid grid-cols-4 gap-3 mt-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
               <Stat v={result.summary.mean_ph} l="Mean pH" />
               <Stat v={result.summary.max_turbidity} l="Peak Turbidity (NTU)" />
               <Stat v={`${result.summary.anomaly_pct}%`} l="Anomaly Frequency" />

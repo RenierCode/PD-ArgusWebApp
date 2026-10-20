@@ -269,7 +269,7 @@ actually transmitted — `ensure_node_registered()` inserts default rows into
    checks stay with the threshold layer. A sensor is judged once it has 30 readings (~45 s at 1.5 s
    per packet); until 2 min have passed, `step` uses the oldest reading. The history is in memory,
    so the models are quiet for the first 30 readings after a restart. The models also start over for each
-   new batch: when the outflow stops after at least 5 L was discharged (`BATCH_DISCHARGE_LITRES`,
+   new batch: when the outflow stops after at least 10 L was discharged (`BATCH_DISCHARGE_LITRES`,
    env `ARGUS_BATCH_DISCHARGE_LITRES`), each node's history is cleared and the next water is learned
    from scratch, since every batch is different wastewater. An ML flag also needs the reading to have moved at least the
    sensor's deadband (`ML_DEADBAND`: 0.15 pH, 0.5 °C, 10 NTU, set from the sensors' rated accuracy /

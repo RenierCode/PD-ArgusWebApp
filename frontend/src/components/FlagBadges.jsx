@@ -24,12 +24,12 @@ export default function FlagBadges({ row }) {
   if (!row.is_anomaly) return <span className="text-dark2">—</span>
   if (row.threshold_flags == null && row.ml_flags == null) {
     // Written before the per-parameter columns existed
-    return <span className="text-dark2" title="Recorded before the source was stored">Flagged</span>
+    return <span className="text-dark2" title="Recorded before the alert type was stored">Alert</span>
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {row.threshold_flags && <Badge kind="threshold">Threshold: {paramList(row.threshold_flags)}</Badge>}
-      {row.ml_flags && <Badge kind="model">ML: {paramList(row.ml_flags)}</Badge>}
+      {row.threshold_flags && <Badge kind="threshold">Threshold breach: {paramList(row.threshold_flags)}</Badge>}
+      {row.ml_flags && <Badge kind="model">Anomaly: {paramList(row.ml_flags)}</Badge>}
     </div>
   )
 }

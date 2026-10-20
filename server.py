@@ -128,10 +128,10 @@ def alert_display_title(alert: dict) -> str:
     """Alerts saved before the engine named the sensors read "Multiple Anomaly Conditions Detected (3)";
     rebuild "Multiple Anomaly Conditions: pH, Turbidity, Water Level" from their params."""
     title = alert.get("title") or ""
-    if re.fullmatch(r"Multiple Anomaly Conditions Detected \(\d+\)", title) and alert.get("params"):
+    if title.startswith("Multiple Anomaly Conditions") and alert.get("params"):
         names = [PARAM_NAMES.get(p, p) for p in alert["params"].split(",") if p]
         if names:
-            return f"Multiple Anomaly Conditions: {', '.join(names)}"
+            return f"Threshold breach: {', '.join(names)}"
     return title
 # "[Threshold — Elevated Turbidity] ..." / "[ML Model - Turbidity] ..." (em dash or hyphen)
 _THRESHOLD_TAG = re.compile(r"\[Threshold\W+([^\]]+)\]")
@@ -1252,7 +1252,7 @@ def _render_pdf(filepath: str, req: ReportRequest, node_label: str, summary: dic
         ("Flagged readings", summary["anomaly_count"]),
         ("Flagged readings (%)", summary["anomaly_pct"]),
         ("Total discharge volume (L)", summary["total_volume_l"]),
-        ("Alerts raised", f"{len(alerts)} ({alert_threshold} threshold, {alert_ml} ML / DSS)"),
+        ("Alerts raised", f"{len(alerts)} ({alert_threshold} threshold breach, {alert_ml} anomaly)"),
     ]]
     story.append(table(summary_rows, [2.6 * inch, 2.4 * inch]))
     if limits:
@@ -1265,8 +1265,8 @@ def _render_pdf(filepath: str, req: ReportRequest, node_label: str, summary: dic
     # ---- 2. Graphs --------------------------------------------------------------------------
     story.append(PageBreak())
     story.append(Paragraph("Graphs", h2))
-    story.append(Paragraph("Times in local time. Dashed lines: acceptable range. Red dots: readings past a "
-                           "threshold. Purple dots: readings the ML models flagged.", small))
+    story.append(Paragraph("Times in local time. Dashed lines: acceptable range. Red dots: threshold "
+                           "breaches. Purple dots: anomalies (unusual changes).", small))
     story.append(Spacer(1, 4))
     for field in ("ph", "turbidity", "temperature"):
         story.append(Image(_render_chart_image(rows, field, limits, tz), width=7.2 * inch, height=2.36 * inch))
@@ -1312,9 +1312,9 @@ def _render_pdf(filepath: str, req: ReportRequest, node_label: str, summary: dic
         for a in alerts:
             kind = []
             if a.get("is_threshold"):
-                kind.append("Threshold")
+                kind.append("Threshold breach")
             if a.get("is_anomaly"):
-                kind.append("ML / DSS")
+                kind.append("Anomaly")
             if a.get("severity"):
                 kind.append(a["severity"])
             if a.get("is_acknowledged"):
