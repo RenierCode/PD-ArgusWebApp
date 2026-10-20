@@ -7,8 +7,8 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 
-# Runtime data, specific to each Pi
-database.db
+# Runtime data: the database itself is committed (merge its WAL first, see below); its temporary
+# side files and the saved reports are not
 database.db-shm
 database.db-wal
 reports/
