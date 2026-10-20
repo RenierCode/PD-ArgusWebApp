@@ -264,11 +264,16 @@ actually transmitted — `ensure_node_registered()` inserts default rows into
 2. **ML models — current: `dev`/`step` models** (`DevStepModels`, loaded when
    `models/training/notebook/devstep_params.json` exists; trained in
    `train_dev_step_models.ipynb`). One `IsolationForest` per sensor that only sees how a reading
-   behaves: `dev` = reading − this node's 24 h median, `step` = change over 2 min (the training
+   behaves: `dev` = reading − this node's batch median (at most 6 h, `ARGUS_ML_BASELINE_HOURS`), `step` = change over 2 min (the training
    data's spacing, so with packets every 30 s it compares with the reading 4 packets back). Range
    checks stay with the threshold layer. A sensor is judged once it has 30 readings (~45 s at 1.5 s
    per packet); until 2 min have passed, `step` uses the oldest reading. The history is in memory,
-   so the models are quiet for the first 30 readings after a restart. In `--sim` each packet
+   so the models are quiet for the first 30 readings after a restart. The models also start over for each
+   new batch: when the outflow stops after at least 5 L was discharged (`BATCH_DISCHARGE_LITRES`,
+   env `ARGUS_BATCH_DISCHARGE_LITRES`), each node's history is cleared and the next water is learned
+   from scratch, since every batch is different wastewater. An ML flag also needs the reading to have moved at least the
+   sensor's deadband (`ML_DEADBAND`: 0.15 pH, 0.5 °C, 10 NTU, set from the sensors' rated accuracy /
+   ADC resolution), so changes the sensors can't resolve are never reported as anomalies. In `--sim` each packet
    counts as one 2-minute reading. Engine features match the notebook's exactly (verified on
    18,560 rows of `series_data.csv`).
 

@@ -226,7 +226,7 @@ def init_db(conn):
         )
         """
     )
-    # The dev/step models' current baseline per node and sensor -- the 24 h median each reading is
+    # The dev/step models' current baseline per node and sensor -- the batch median each reading is
     # compared with -- rewritten on every packet, for the dashboard's expanded chart view.
     cur.execute(
         """
@@ -387,6 +387,21 @@ class AnomalyModels:
 
 
 DEVSTEP_PARAMS = "devstep_params.json"
+# The ML baseline: the median of the current batch, at most this many hours back (one 4 h aeration +
+# 2 h settling cycle). 0 = use the training setting from devstep_params.json (24 h).
+ML_BASELINE_HOURS = float(os.environ.get("ARGUS_ML_BASELINE_HOURS", "6"))
+# Deadband: an ML flag only counts when the reading moved at least this far (from its batch median or
+# within step_minutes), in the sensor's own unit. The models flag sudden changes as small as ~0.08 pH,
+# 0.3 °C or 30 % turbidity -- at or below what these sensors can resolve, so such flags can't be told
+# apart from measurement noise. Basis:
+#   pH 0.15        E-201-C electrode's listed +/-0.15 pH; ~5 ADC steps (5.832 pH/V x 4.89 mV = 0.03 pH)
+#   temperature 0.5 °C   DS18B20 rated accuracy +/-0.5 °C (Maxim/Analog Devices datasheet)
+#   turbidity 10 NTU     SEN0189 has no published accuracy; ~3 ADC steps (3000 NTU / 3.968 V x 4.89 mV = 3.7 NTU)
+ML_DEADBAND = {
+    "ph": float(os.environ.get("ARGUS_ML_DEADBAND_PH", "0.15")),
+    "temperature": float(os.environ.get("ARGUS_ML_DEADBAND_TEMP", "0.5")),
+    "turbidity": float(os.environ.get("ARGUS_ML_DEADBAND_TURB", "10")),
+}
 # devstep_params.json key -> (sensor name used in alerts and ml_flags, how the value is fed in,
 # and back to the sensor's own unit -- for showing the median)
 DEVSTEP_SENSORS = {
@@ -408,7 +423,8 @@ class DevStepModels:
     """The dev/step models from train_dev_step_models.ipynb (see devstep_params.json).
 
     They judge how a reading BEHAVES, not its value (the threshold rules do that):
-      dev  = reading - median of this node's readings over the last 24 h (current one included)
+      dev  = reading - median of this node's readings in the current batch, at most the last
+             ML_BASELINE_HOURS (6 h; current one included)
       step = reading - this node's reading from step_minutes (2 min) earlier
     built exactly as in training, where readings were 2 minutes apart. With a node sending every
     30 s, step therefore looks 4 packets back, not at the previous packet; a step over 30 s would be
@@ -427,7 +443,10 @@ class DevStepModels:
             params = json.load(params_file)
         if params["features"] != ["dev", "step"] or params.get("flag_if", "score < 0") != "score < 0":
             raise ValueError(f"{DEVSTEP_PARAMS}: expected features [dev, step] flagged on score < 0")
-        self.baseline_s = _duration_seconds(params["baseline"])
+        # The baseline window: one 6 h treatment cycle (ML_BASELINE_HOURS), not the 24 h the models were
+        # trained with -- the history also restarts each batch (batch_discharged), so this only caps how
+        # far back it reaches if a discharge goes undetected
+        self.baseline_s = ML_BASELINE_HOURS * 3600 if ML_BASELINE_HOURS else _duration_seconds(params["baseline"])
         self.step_s = float(params["step_minutes"]) * 60
         self.min_history = int(params["min_history"])
         self.packet_s = None if packet_minutes is None else packet_minutes * 60
@@ -467,10 +486,26 @@ class DevStepModels:
         previous = next((v for t, v in reversed(history) if t <= cutoff), history[0][1])
         return value - median, value - previous, previous - median
 
+    def reset(self, node_id: int):
+        """Forget a node's history: the next readings are a new batch of water, learned from scratch."""
+        for key in [k for k in self.history if k[0] == node_id]:
+            del self.history[key]
+        for key in [k for k in self.baselines if k[0] == node_id]:
+            del self.baselines[key]
+
     def baseline_rows(self, node_id: int):
-        """(sensor, 24 h median in the sensor's unit, readings in the window, judged yet) per sensor."""
+        """(sensor, batch median in the sensor's unit, readings in the window, judged yet) per sensor."""
         return [(sensor, self.to_unit[sensor](median), count, int(ready))
                 for (node, sensor), (median, count, ready) in self.baselines.items() if node == node_id]
+
+    def _change_in_unit(self, node_id: int, sensor: str, value: float, dev: float, step: float) -> float:
+        """The larger of the reading's distance from its batch median and its change over step_minutes,
+        in the sensor's own unit (turbidity: NTU, converted back from the model's log scale)."""
+        if sensor != "turbidity":
+            return max(abs(dev), abs(step))
+        median = self.to_unit[sensor](self.baselines[(node_id, sensor)][0])
+        previous = math.expm1(math.log1p(max(value, 0.0)) - step)
+        return max(abs(value - median), abs(value - previous))
 
     @staticmethod
     def _score(session, dev: float, step: float) -> float:
@@ -494,18 +529,28 @@ class DevStepModels:
             # still is.
             if score < 0 and abs(dev) < abs(previous_dev) and self._score(session, dev, 0.0) >= 0:
                 score = 0.0
+            # Deadband: a change smaller than the sensor can resolve isn't evidence of anything
+            if score < 0 and self._change_in_unit(node_id, sensor, readings[sensor], dev, step) < ML_DEADBAND.get(sensor, 0.0):
+                score = 0.0
             if score < 0:
-                findings.append(AnomalyFinding(sensor, self._describe(sensor, readings[sensor], dev, step, score)))
+                findings.append(AnomalyFinding(sensor, self._describe(node_id, sensor, readings[sensor], dev, step, score)))
         return findings
 
-    def _describe(self, sensor: str, value: float, dev: float, step: float, score: float) -> str:
-        span = f"{self.step_s / 60:g} min"
-        if sensor == "turbidity":       # dev/step are on log1p(NTU): report them as percentages
-            return (f"Turbidity model flagged {value:.1f} NTU: {math.expm1(dev):+.0%} vs its 24 h median, "
-                    f"{math.expm1(step):+.0%} over {span} (score {score:.3f}).")
-        unit, label = ("", "pH") if sensor == "ph" else (" C", "Temperature")
-        return (f"{label} model flagged {value:.2f}{unit}: {dev:+.2f}{unit} from its 24 h median, "
-                f"{step:+.2f}{unit} over {span} (score {score:.3f}).")
+    def _describe(self, node_id: int, sensor: str, value: float, dev: float, step: float, score: float) -> str:
+        """The evidence for a flag: the reading against its batch median, its change over step_minutes,
+        and the model's score (an Isolation Forest flags scores below 0; the lower, the more unusual)."""
+        span = f"{self.step_s / 60:g} minutes"
+        median = self.to_unit[sensor](self.baselines[(node_id, sensor)][0])
+        side = "above" if dev > 0 else "below"
+        move = "rose" if step > 0 else "fell"
+        evidence = f"Model score {score:.3f} (below 0 = anomaly)."
+        if sensor == "turbidity":       # the model works on log1p(NTU); report in NTU like the others
+            previous = math.expm1(math.log1p(max(value, 0.0)) - step)      # the reading step_minutes earlier
+            return (f"{value:.1f} NTU is {abs(value - median):.1f} NTU {side} its batch median of {median:.1f} NTU, "
+                    f"and {move} {abs(value - previous):.1f} NTU within {span}. {evidence}")
+        unit = "" if sensor == "ph" else " °C"
+        return (f"{value:.2f}{unit} is {abs(dev):.2f}{unit} {side} its batch median of {median:.2f}{unit}, "
+                f"and {move} {abs(step):.2f}{unit} within {span}. {evidence}")
 
 
 def load_models(models_dir: str = MODELS_DIR, sim: bool = False):
@@ -710,12 +755,30 @@ def radio_send(radio, text: str):
 
 
 # One ML event, one notification: a model keeps flagging for as long as a reading stays unusual
-# (its dev feature stays far from the 24 h median for hours after a lasting shift). ML flags are
+# (its dev feature stays far from the batch median for hours after a lasting shift). ML flags are
 # reported as DSS diagnoses (dss_rules.py), and a diagnosis only raises a notification if the same
 # one wasn't raised on this node within the last ML_ALERT_QUIET_SECONDS; every repeat restarts that
 # window. Every flagged reading is still stored in telemetry_logs.ml_flags, so the chart shows them
 # all. Threshold alerts are not affected.
 ML_ALERT_QUIET_SECONDS = 5 * 60
+
+# A new batch starts once the treated water has been discharged. Each batch is different water,
+# so the ML relearns its baseline from the new water instead of comparing it with the last batch.
+# The flow sensor measures the outflow; the node's Vol is the running total of the current
+# discharge (reset by the Arduino after 60 s without flow). When the flow stops after at least
+# BATCH_DISCHARGE_LITRES went out, the batch has left: the ML forgets that node's history and
+# warms up on the next water (min_history readings; the threshold rules stay active throughout).
+BATCH_DISCHARGE_LITRES = float(os.environ.get("ARGUS_BATCH_DISCHARGE_LITRES", "5.0"))
+_discharged: dict[int, float] = {}    # node_id -> litres out so far in the current discharge
+
+
+def batch_discharged(node_id: int, flow: float, vol: float) -> float | None:
+    """The litres discharged if this reading ends a discharge of at least BATCH_DISCHARGE_LITRES."""
+    if flow > 0:
+        _discharged[node_id] = max(_discharged.get(node_id, 0.0), vol)
+        return None
+    litres = _discharged.pop(node_id, 0.0)
+    return litres if litres >= BATCH_DISCHARGE_LITRES else None
 _last_ml_flag: dict[tuple[int, str], float] = {}     # (node_id, diagnosis key) -> time.monotonic() of the last one
 
 
@@ -731,6 +794,26 @@ def diagnoses_to_notify(node_id: int, diagnoses, now: float):
     return new
 
 
+PARAM_NAMES = {"ph": "pH", "turbidity": "Turbidity", "temperature": "Temperature", "level": "Water Level", "flow": "Flow"}
+
+
+def threshold_dss(ph, temp, turbidity, level, flow, limits, rule_alerts):
+    """The DSS guidance (most common reasons, actions, references) for exactly the limits crossed, as JSON."""
+    guidance = dss_rules.threshold_guidance(
+        {"ph": ph, "temperature": temp, "turbidity": turbidity, "level": level, "flow": flow},
+        limits, [key for key, _, _ in rule_alerts])
+    return json.dumps(guidance) if guidance else None
+
+
+def alert_title(rule_alerts) -> str:
+    """One threshold alert keeps its own title; several name their sensors, e.g.
+    "Multiple Anomaly Conditions: pH, Turbidity, Water Level"."""
+    if len(rule_alerts) == 1:
+        return rule_alerts[0][1]
+    names = [PARAM_NAMES.get(key, key) for key in dict.fromkeys(key for key, _, _ in rule_alerts)]
+    return f"Multiple Anomaly Conditions: {', '.join(names)}"
+
+
 def handle_data(conn, models, radio, fields):
     node_id = int(fields["node"])
     packet_id = int(fields["pid"])
@@ -742,6 +825,11 @@ def handle_data(conn, models, radio, fields):
     vol = float(fields["vol"])        # the node's running total, stored exactly as sent
 
     ensure_node_registered(conn, node_id)
+    discharged = batch_discharged(node_id, flow, vol)
+    if discharged is not None and hasattr(models, "reset"):
+        models.reset(node_id)
+        log.info("[%s][NODE %s] %.1f L discharged: new batch, ML relearning the baseline from the new water",
+                 ts(), node_id, discharged)
     ml_findings = models.evaluate(node_id, ph, turbidity, temp)
     limits = get_thresholds(conn, node_id)
     rule_alerts = evaluate_thresholds(ph, turbidity, temp, level, flow, limits)
@@ -775,14 +863,15 @@ def handle_data(conn, models, radio, fields):
     if rule_alerts:
         titles = [title for _, title, _ in rule_alerts]
         messages = [f"[Threshold - {title}] {message}" for _, title, message in rule_alerts]
-        title = titles[0] if len(titles) == 1 else f"Multiple Anomaly Conditions Detected ({len(titles)})"
+        title = alert_title(rule_alerts)
         cur.execute(
             """INSERT INTO notification_logs
             (node_id, is_threshold, is_anomaly, title, message,
-             ph_snapshot, turbidity_snapshot, temp_snapshot, params)
-            VALUES (?, 1, 0, ?, ?, ?, ?, ?, ?)""",
+             ph_snapshot, turbidity_snapshot, temp_snapshot, params, dss)
+            VALUES (?, 1, 0, ?, ?, ?, ?, ?, ?, ?)""",
             (node_id, title, " ".join(messages), ph, turbidity, temp,
-             ",".join(dict.fromkeys(key for key, _, _ in rule_alerts))),
+             ",".join(dict.fromkeys(key for key, _, _ in rule_alerts)),
+             threshold_dss(ph, temp, turbidity, level, flow, limits, rule_alerts)),
         )
     for _, title, sensors, dss in dss_alerts:
         cur.execute(
@@ -805,7 +894,7 @@ def handle_log(conn, radio, fields):
     """A stored reading sent late (LOG|...): saved at the time it was measured -- arrival minus
     Age -- so charts, logs and reports put it where it belongs. Only the threshold rules judge it:
     the ML models compare each reading with the ones just before it in real time, and a late one
-    would skew their 24 h median and 2-minute step. An alert it raises carries the measurement
+    would skew their batch median and 2-minute step. An alert it raises carries the measurement
     time and says how late it arrived."""
     node_id = int(fields["node"])
     packet_id = int(fields["pid"])
@@ -826,7 +915,8 @@ def handle_log(conn, radio, fields):
         log.info("[%s][NODE %s][LOG %s] Already stored -> ACK (not stored again).", ts(), node_id, packet_id)
         return
 
-    rule_alerts = evaluate_thresholds(ph, turbidity, temp, level, flow, get_thresholds(conn, node_id))
+    limits = get_thresholds(conn, node_id)
+    rule_alerts = evaluate_thresholds(ph, turbidity, temp, level, flow, limits)
     threshold_flags = ",".join(dict.fromkeys(key for key, _, _ in rule_alerts)) or None
     cur.execute(
         """INSERT INTO telemetry_logs
@@ -839,15 +929,16 @@ def handle_log(conn, radio, fields):
     if rule_alerts:
         late = f"Delivered late: measured {age // 60} min {age % 60} s before it reached the gateway."
         titles = [title for _, title, _ in rule_alerts]
-        title = titles[0] if len(titles) == 1 else f"Multiple Anomaly Conditions Detected ({len(titles)})"
+        title = alert_title(rule_alerts)
         messages = [f"[Threshold - {title}] {message}" for _, title, message in rule_alerts]
         cur.execute(
             """INSERT INTO notification_logs
             (node_id, timestamp, is_threshold, is_anomaly, title, message,
-             ph_snapshot, turbidity_snapshot, temp_snapshot, params)
-            VALUES (?, datetime('now', ?), 1, 0, ?, ?, ?, ?, ?, ?)""",
+             ph_snapshot, turbidity_snapshot, temp_snapshot, params, dss)
+            VALUES (?, datetime('now', ?), 1, 0, ?, ?, ?, ?, ?, ?, ?)""",
             (node_id, measured_at, title, " ".join(messages + [late]), ph, turbidity, temp,
-             ",".join(dict.fromkeys(key for key, _, _ in rule_alerts))),
+             ",".join(dict.fromkeys(key for key, _, _ in rule_alerts)),
+             threshold_dss(ph, temp, turbidity, level, flow, limits, rule_alerts)),
         )
     conn.commit()
 

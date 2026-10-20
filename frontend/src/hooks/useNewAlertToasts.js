@@ -3,6 +3,7 @@ import { api, onLive } from '../api.js'
 import { useToast } from '../components/Toasts.jsx'
 import { Badge } from '../components/FlagBadges.jsx'
 import { formatDbTime } from '../time.js'
+import { toastTitle } from '../alertTitle.js'
 
 // Only the newest few are worth a toast; the stack shows at most 3 anyway
 const MAX_PER_CHECK = 3
@@ -39,9 +40,9 @@ export function useNewAlertToasts(nodes, onOpen) {
           toast({
             key: `alert-${n.id}`,
             tone: n.is_threshold ? 'threshold' : 'model',
-            title: n.title,
+            title: toastTitle(n),
             message: alertDetails(n, label, i === 0 ? skipped : 0),
-            compactText: `${label} · ${n.title}`,
+            compactText: `${label} · ${toastTitle(n)}`,
             onClick: () => onOpenRef.current?.(n.id),
           })
         })
@@ -65,6 +66,8 @@ function alertDetails(n, nodeLabel, skipped) {
     row('Flagged by', h('span', { className: 'flex flex-wrap gap-1' },
       n.is_threshold ? h(Badge, { kind: 'threshold' }, 'Threshold') : null,
       n.is_anomaly ? h(Badge, { kind: 'model' }, 'ML model') : null)),
+    // ML alerts are titled by their sensors; the DSS diagnosis ("Possible plant-wide upset: ...") goes here
+    n.is_anomaly && n.dss ? row('Diagnosis', h('span', { className: 'text-dark' }, n.title)) : null,
     skipped > 0 ? h('div', { className: 'text-dark2 pt-0.5' }, `+${skipped} earlier alert${skipped > 1 ? 's' : ''} not shown`) : null,
   )
 }

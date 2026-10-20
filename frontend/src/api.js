@@ -17,6 +17,9 @@ export const api = {
   telemetryLatest: (nodeId) => request('GET', `/api/telemetry/latest?node_id=${nodeId}`),
   telemetryHistory: (nodeId, timeframe) =>
     request('GET', `/api/telemetry/history?node_id=${nodeId}&timeframe=${timeframe}`),
+  // A chosen date range (UTC database timestamps), thinned to about maxPoints readings
+  telemetryHistoryRange: (nodeId, start, end, maxPoints = 2000) => request('GET',
+    `/api/telemetry/history?node_id=${nodeId}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&max_points=${maxPoints}`),
   telemetryBaseline: (nodeId) => request('GET', `/api/telemetry/baseline?node_id=${nodeId}`),
   telemetryRows: ({ nodeId, start, end, flag = 'all', page = 1, pageSize = 50 }) => {
     const params = new URLSearchParams({ page, page_size: pageSize, flag })
@@ -41,6 +44,7 @@ export const api = {
   reportViewUrl: (filename) => `/api/reports/view/${encodeURIComponent(filename)}`,
   reportPreview: (filename) => request('GET', `/api/reports/preview/${encodeURIComponent(filename)}`),
   reportFiles: () => request('GET', '/api/reports/files'),
+  dssGuide: () => request('GET', '/api/dss/guide'),
   deleteReports: (filenames) => request('POST', '/api/reports/delete', { filenames }),
   reportPages: (filename) => request('GET', `/api/reports/pages/${encodeURIComponent(filename)}`),
   reportPageUrl: (filename, page) => `/api/reports/page/${encodeURIComponent(filename)}/${page}`,
@@ -55,6 +59,9 @@ export const api = {
   // This browser's clock, so a Pi without internet time can set its clock from a phone
   syncTime: () => request('POST', '/api/system/time', { client_ms: Date.now() }),
   timeStatus: () => request('GET', '/api/system/time'),
+  // Safe shutdown: allowed only from the Pi's own screen
+  shutdownAllowed: () => request('GET', '/api/system/shutdown'),
+  shutdown: () => request('POST', '/api/system/shutdown'),
   nodeStatus: () => request('GET', '/api/nodes/status'),
 }
 

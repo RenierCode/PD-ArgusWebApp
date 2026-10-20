@@ -1,11 +1,10 @@
 import {
-  ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceArea,
+  ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts'
 import { parseDbTime } from '../time.js'
 
 export const MARK_COLORS = { threshold: '#D03B3B', model: '#4A3AA7' }
 const LINE_COLOR = '#0284C7'
-const BAND_COLOR = '#16A34A'
 
 // Which system_thresholds columns bound each charted field. floor is the
 // fixed lower bound for a field with no min column (turbidity: 0 NTU).
@@ -31,7 +30,7 @@ function hasFlag(list, field) {
 /**
  * Per-field flags for one telemetry row. The threshold side is checked
  * against the node's current limits, so the dots always agree with the
- * shaded band, even for readings stored before the limits changed (the
+ * dashed limit lines, even for readings stored before the limits changed (the
  * stored threshold_flags reflect the limits at ingest time). The model side
  * comes from ml_flags, since the model's verdict can't be recomputed here.
  */
@@ -104,8 +103,8 @@ function BaselineText({ baseline, decimals, unit }) {
   if (baseline.median == null) return null
   return (
     <span className="text-xs text-dark2"
-      title="The ML model compares each new reading with this node's median over the last 24 hours">
-      · 24 h median <b className="text-dark">{baseline.median.toFixed(decimals)}{unit}</b>
+      title="The ML model compares each new reading with this node's median since the current batch started (at most 6 hours)">
+      · batch median <b className="text-dark">{baseline.median.toFixed(decimals)}{unit}</b>
       {baseline.ready ? ` (${baseline.readings} readings)` : ` · ML warming up (${baseline.readings} readings so far)`}
     </span>
   )
@@ -114,11 +113,11 @@ function BaselineText({ baseline, decimals, unit }) {
 /**
  * rows: telemetry_logs rows (already filtered to the selected timeframe)
  * field: 'ph' | 'turbidity' | 'temperature'
- * limits: this node's system_thresholds row (drawn as a shaded band with dashed edges)
+ * limits: this node's system_thresholds row (drawn as dashed limit lines)
  * show: { threshold: bool, model: bool } -- which flag markers to draw
  * clamp: optional [min, max] the Y axis never goes past (e.g. pH 0-14)
  * baseline: optional { median, readings, ready } from /api/telemetry/baseline -- the ML models'
- *   24 h median for this sensor, shown next to the current value (the expanded view passes it)
+ *   batch median for this sensor, shown next to the current value (the expanded view passes it)
  */
 export default function TelemetryChart({ rows, field, limits, show, label, unit = '', decimals = 2, clamp, height = 240, baseline }) {
   const range = rangeFor(field, limits)
@@ -141,14 +140,14 @@ export default function TelemetryChart({ rows, field, limits, show, label, unit 
   // that hides the line, so shrink them as the window fills up.
   const markSize = data.length > 300 ? 0.45 : data.length > 120 ? 0.7 : 1
 
-  // Dashed edges only for configured limits; a fixed floor (turbidity 0) just bounds the band
+  // Dashed lines only for configured limits, not for a fixed floor (turbidity 0)
   const keys = LIMIT_KEYS[field]
   const lines = [
     keys.min && range.lo != null && { y: range.lo, text: `min ${formatLimit(range.lo)}`, position: 'insideBottomRight' },
     range.hi != null && { y: range.hi, text: `max ${formatLimit(range.hi)}`, position: 'insideTopRight' },
   ].filter(Boolean)
 
-  // Fit the data and the whole band, with a little headroom.
+  // Fit the data and both limit lines, with a little headroom.
   const values = data.map((d) => d.value).concat([range.lo, range.hi].filter((v) => v != null))
   let lo = values.length ? Math.min(...values) : 0
   let hi = values.length ? Math.max(...values) : 1
@@ -186,8 +185,8 @@ export default function TelemetryChart({ rows, field, limits, show, label, unit 
         </div>
         <div className="flex items-center gap-3 text-xs text-dark2">
           {(range.lo != null || range.hi != null) && (
-            <span className="flex items-center gap-1" title="Acceptable range for this node">
-              <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: BAND_COLOR, opacity: 0.35 }} />
+            <span className="flex items-center gap-1" title="Acceptable range for this node (dashed lines)">
+              <span className="inline-block w-3 border-t border-dashed border-slate-400" />
               {rangeText}
             </span>
           )}
@@ -217,13 +216,6 @@ export default function TelemetryChart({ rows, field, limits, show, label, unit 
                 domain={[lo, hi]} allowDataOverflow tick={{ fontSize: 11, fill: '#64748B' }} stroke="#CBD5E1"
                 tickFormatter={(v) => Number(v.toFixed(field === 'turbidity' ? 0 : 1))} width={48}
               />
-              {/* Acceptable range, drawn first so everything else sits on top of it */}
-              {(range.lo != null || range.hi != null) && (
-                <ReferenceArea
-                  y1={range.lo ?? lo} y2={range.hi ?? hi} fill={BAND_COLOR} fillOpacity={0.08}
-                  stroke="none" ifOverflow="hidden"
-                />
-              )}
               {lines.map((l) => (
                 <ReferenceLine
                   key={l.text} y={l.y} stroke="#94A3B8" strokeDasharray="4 4" ifOverflow="extendDomain"

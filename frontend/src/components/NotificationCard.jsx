@@ -1,6 +1,7 @@
 import { MARK_COLORS } from './TelemetryChart.jsx'
 import { Badge } from './FlagBadges.jsx'
 import { formatDbTime } from '../time.js'
+import { alertTitle } from '../alertTitle.js'
 import DssDetails, { parseDss, SEVERITY_STYLE } from './DssDetails.jsx'
 
 export default function NotificationCard({ n, nodeLabel, onAcknowledge, highlighted = false }) {
@@ -33,7 +34,7 @@ export default function NotificationCard({ n, nodeLabel, onAcknowledge, highligh
         </div>
         <div className="text-xs text-dark2">{formatDbTime(n.timestamp)}</div>
       </div>
-      <div className="font-semibold text-sm mb-1.5">{n.title}</div>
+      <div className="font-semibold text-sm mb-1.5">{alertTitle(n)}</div>
       {dss && <div className="text-xs text-dark2 -mt-1 mb-1.5">Where: {dss.stage}</div>}
       <div className="font-mono text-xs bg-canvas2 px-2.5 py-1.5 rounded-md inline-block mb-2">
         pH: {n.ph_snapshot} | Turb: {n.turbidity_snapshot} NTU | Temp: {n.temp_snapshot}°C

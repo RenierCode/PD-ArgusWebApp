@@ -1,5 +1,6 @@
 import { Menu, Gauge, Bell, Database, FileText, Settings, Info, Accessibility } from 'lucide-react'
 import logo from '../assets/logo.svg'
+import ShutdownButton from './ShutdownButton.jsx'
 
 const NAV_ITEMS = [
   { key: 'dashboard', icon: Gauge, label: 'Main Dashboard' },
@@ -31,7 +32,8 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, nodes,
         </button>
       </div>
 
-      {!collapsed && (
+      {/* Only worth choosing between nodes once there is more than one */}
+      {!collapsed && nodes.length > 1 && (
         <div className="p-3 border-b border-slate-800">
           <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">Context</div>
           <select
@@ -57,6 +59,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, nodes,
         {SYSTEM_ITEMS.map((item) => (
           <NavRow key={item.key} item={item} active={view === item.key} collapsed={collapsed} onClick={() => setView(item.key)} />
         ))}
+        <ShutdownButton collapsed={collapsed} />
       </div>
 
       {!collapsed && (

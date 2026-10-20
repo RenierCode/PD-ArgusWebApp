@@ -93,7 +93,9 @@ fi
 # Clock sync from a phone (server.py /api/system/time): the server sets the Pi's clock with
 # "sudo date". Allow exactly that command without a password, nothing else.
 SUDOERS_FILE=/etc/sudoers.d/argus-clock
-printf '%s ALL=(root) NOPASSWD: /usr/bin/date -u -s @*\n' "$RUN_USER" > "$tmp/argus-clock"
+# ...and the dashboard's Shut down button runs "sudo systemctl poweroff" (that command only).
+{ printf '%s ALL=(root) NOPASSWD: /usr/bin/date -u -s @*\n' "$RUN_USER"
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff\n' "$RUN_USER"; } > "$tmp/argus-clock"
 if (( DRY_RUN )); then
   say "--- would install $SUDOERS_FILE:"
   sed 's/^/    /' "$tmp/argus-clock"

@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { TankGauge, TachoGauge } from '../components/Gauges.jsx'
 import TelemetryChart, { MarkSwatch } from '../components/TelemetryChart.jsx'
 import { api } from '../api.js'
+import { localDateToDb } from '../time.js'
 
-export default function Dashboard({ nodeContext, nodes, liveByNode, thresholdsByNode, nodeStatus, onExpandedChange }) {
+export default function Dashboard({ nodeContext, nodes, liveByNode, thresholdsByNode, nodeStatus, onExpandedChange, onOpenNode }) {
   if (nodeContext === 'all') {
-    return <AllNodesGrid nodes={nodes} liveByNode={liveByNode} nodeStatus={nodeStatus} />
+    return <AllNodesGrid nodes={nodes} liveByNode={liveByNode} nodeStatus={nodeStatus} onOpenNode={onOpenNode} />
   }
   return <NodeDashboard nodeId={Number(nodeContext)} nodes={nodes} live={liveByNode[nodeContext]}
     limits={thresholdsByNode[nodeContext]} status={nodeStatus?.[nodeContext]} onExpandedChange={onExpandedChange} />
@@ -156,27 +157,42 @@ const FIELD_META = {
   temperature: { label: 'Temperature', unit: '°C' },
 }
 
+const todayLocal = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose }) {
-  const [range, setRange] = useState('1h')
+  const [range, setRange] = useState('1h')          // '1h' | '6h' | '24h' | 'dates'
+  const [fromDate, setFromDate] = useState(todayLocal)
+  const [toDate, setToDate] = useState(todayLocal)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const meta = FIELD_META[field]
+  const datesInvalid = range === 'dates' && (!fromDate || !toDate || fromDate > toDate)
 
   useEffect(() => {
+    if (datesInvalid) return undefined
     let cancelled = false
     setLoading(true)
-    api.telemetryHistory(nodeId, range).then((rows) => {
+    // Picked days in local time, whole days, as the database's UTC timestamps
+    const request = range === 'dates'
+      ? api.telemetryHistoryRange(nodeId, localDateToDb(fromDate), localDateToDb(toDate, true))
+      : api.telemetryHistory(nodeId, range)
+    request.then((rows) => {
       if (!cancelled) { setHistory(rows); setLoading(false) }
     }).catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [nodeId, range])
+  }, [nodeId, range, fromDate, toDate, datesInvalid])
 
-  // Keep the expanded view live too, same splicing pattern as the main dashboard
+  // Keep the expanded view live too, same splicing pattern as the main dashboard -- except for a
+  // date range that ends before today, which shouldn't grow
   useEffect(() => {
-    if (live) setHistory((prev) => (prev.some((r) => r.id === live.id) ? prev : [...prev, live].slice(-2000)))
-  }, [live])
+    if (!live || (range === 'dates' && toDate < todayLocal())) return
+    setHistory((prev) => (prev.some((r) => r.id === live.id) ? prev : [...prev, live].slice(-2000)))
+  }, [live]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The ML models' current 24 h median for each sensor, refreshed with every new packet
+  // The ML models' current batch median for each sensor, refreshed with every new packet
   const [baselines, setBaselines] = useState({})
   useEffect(() => {
     let cancelled = false
@@ -206,7 +222,7 @@ function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose })
           <h2 className="text-lg font-bold text-dark">{meta.label}</h2>
           <div className="flex items-center gap-3">
             <div className="flex gap-1.5">
-              {['1h', '6h', '24h'].map((r) => (
+              {['1h', '6h', '24h', 'dates'].map((r) => (
                 <button
                   key={r}
                   className={`px-3 py-1 rounded-full border text-xs ${
@@ -214,10 +230,21 @@ function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose })
                   }`}
                   onClick={() => setRange(r)}
                 >
-                  {r.toUpperCase()}
+                  {r === 'dates' ? 'DATES' : r.toUpperCase()}
                 </button>
               ))}
             </div>
+            {range === 'dates' && (
+              <div className="flex items-center gap-1.5 text-xs text-dark2">
+                <input type="date" aria-label="From date" value={fromDate} max={toDate || undefined}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="p-1 border border-border rounded-md text-xs bg-white" />
+                <span>to</span>
+                <input type="date" aria-label="To date" value={toDate} min={fromDate || undefined}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="p-1 border border-border rounded-md text-xs bg-white" />
+              </div>
+            )}
             <button
               type="button" onClick={onClose} aria-label="Close"
               className="text-dark2 hover:text-dark text-xl leading-none px-1"
@@ -226,7 +253,9 @@ function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose })
             </button>
           </div>
         </div>
-        {loading && history.length === 0 ? (
+        {datesInvalid ? (
+          <div className="h-[480px] flex items-center justify-center text-sm text-alert">Pick a From date on or before the To date.</div>
+        ) : loading && history.length === 0 ? (
           <div className="h-[480px] flex items-center justify-center text-sm text-dark2">Loading…</div>
         ) : (
           <TelemetryChart
@@ -240,7 +269,8 @@ function ExpandedChartModal({ nodeId, field, limits, live, showMarks, onClose })
   )
 }
 
-function AllNodesGrid({ nodes, liveByNode, nodeStatus }) {
+// Each card opens that node's own dashboard (same as picking it in the sidebar)
+function AllNodesGrid({ nodes, liveByNode, nodeStatus, onOpenNode }) {
   const anyOnline = Object.values(nodeStatus || {}).some((s) => s.is_online)
   return (
     <div>
@@ -249,7 +279,9 @@ function AllNodesGrid({ nodes, liveByNode, nodeStatus }) {
         {nodes.map((n) => {
           const latest = liveByNode[n.node_id]
           return (
-            <div key={n.node_id} className="bg-white border border-border rounded-lg p-4">
+            <button key={n.node_id} type="button" onClick={() => onOpenNode?.(String(n.node_id))}
+              aria-label={`Open ${n.label}'s dashboard`}
+              className="text-left bg-white border border-border rounded-lg p-4 cursor-pointer transition-shadow hover:shadow-md hover:border-accentSky focus:outline-none focus-visible:ring-2 focus-visible:ring-accentSky">
               <div className="flex justify-between items-center mb-2.5">
                 <b>{n.label}</b>
                 <span
@@ -270,7 +302,8 @@ function AllNodesGrid({ nodes, liveByNode, nodeStatus }) {
               ) : (
                 <div className="text-sm text-dark2">Waiting for telemetry…</div>
               )}
-            </div>
+              <div className="text-xs text-accentSky mt-3">Open dashboard →</div>
+            </button>
           )
         })}
       </div>

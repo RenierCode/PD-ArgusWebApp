@@ -33,6 +33,8 @@ matplotlib.use("Agg")  # headless -- no display on the Pi, must be set before im
 import matplotlib.pyplot as plt
 
 import aiosqlite
+
+import dss_rules
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -119,6 +121,18 @@ THRESHOLD_TITLE_PARAMS = {
 }
 ML_SENSOR_PARAMS = {"ph": "ph", "turbidity": "turbidity", "temperature": "temperature"}
 NOTIFICATION_PARAMS = ("ph", "turbidity", "temperature", "level", "flow")
+PARAM_NAMES = {"ph": "pH", "turbidity": "Turbidity", "temperature": "Temperature", "level": "Water Level", "flow": "Flow"}
+
+
+def alert_display_title(alert: dict) -> str:
+    """Alerts saved before the engine named the sensors read "Multiple Anomaly Conditions Detected (3)";
+    rebuild "Multiple Anomaly Conditions: pH, Turbidity, Water Level" from their params."""
+    title = alert.get("title") or ""
+    if re.fullmatch(r"Multiple Anomaly Conditions Detected \(\d+\)", title) and alert.get("params"):
+        names = [PARAM_NAMES.get(p, p) for p in alert["params"].split(",") if p]
+        if names:
+            return f"Multiple Anomaly Conditions: {', '.join(names)}"
+    return title
 # "[Threshold — Elevated Turbidity] ..." / "[ML Model - Turbidity] ..." (em dash or hyphen)
 _THRESHOLD_TAG = re.compile(r"\[Threshold\W+([^\]]+)\]")
 _ML_TAG = re.compile(r"\[ML Model\W+([^\]]+)\]")
@@ -312,26 +326,42 @@ async def telemetry_latest(node_id: int):
         await db.close()
 
 
+HISTORY_MAX_POINTS = 2000
+
+
 @app.get("/api/telemetry/history")
-async def telemetry_history(node_id: int, timeframe: str = "1h"):
-    if timeframe not in TIMEFRAME_MINUTES:
-        raise HTTPException(400, "timeframe must be one of 1h, 6h, 24h")
-    since = datetime.utcnow() - timedelta(minutes=TIMEFRAME_MINUTES[timeframe])
+async def telemetry_history(node_id: int, timeframe: str = "1h", start: Optional[str] = None,
+                            end: Optional[str] = None, max_points: Optional[int] = None):
+    """Chart series: the last `timeframe` (1h / 6h / 24h), or start..end (UTC "YYYY-MM-DD HH:MM:SS",
+    the expanded chart's date range). With max_points, a longer series is thinned to about that
+    many readings -- evenly spaced, but every flagged reading is kept so no marker is lost."""
+    if start or end:
+        clause, params = "AND timestamp >= ? AND timestamp <= ?", [start or "0000", end or "9999"]
+    elif timeframe in TIMEFRAME_MINUTES:
+        since = datetime.utcnow() - timedelta(minutes=TIMEFRAME_MINUTES[timeframe])
+        clause, params = "AND timestamp >= ?", [since.isoformat(sep=" ", timespec="seconds")]
+    else:
+        raise HTTPException(400, "timeframe must be one of 1h, 6h, 24h (or give start/end)")
     db = await get_db()
     try:
         cur = await db.execute(
-            "SELECT * FROM telemetry_logs WHERE node_id = ? AND timestamp >= ? ORDER BY timestamp ASC",
-            (node_id, since.isoformat(sep=" ", timespec="seconds")),
+            f"SELECT * FROM telemetry_logs WHERE node_id = ? {clause} ORDER BY timestamp ASC",
+            (node_id, *params),
         )
-        rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        rows = [dict(r) for r in await cur.fetchall()]
     finally:
         await db.close()
+    limit = min(max_points or len(rows), HISTORY_MAX_POINTS * 5)
+    if len(rows) > limit > 0:
+        every = len(rows) / limit
+        keep = {int(i * every) for i in range(limit)} | {len(rows) - 1}
+        rows = [r for i, r in enumerate(rows) if i in keep or r.get("is_anomaly")]
+    return rows
 
 
 @app.get("/api/telemetry/baseline")
 async def telemetry_baseline(node_id: int):
-    """The ML models' current baseline per sensor: the 24 h median each new reading is compared
+    """The ML models' current baseline per sensor: the batch median (at most 6 h) each new reading is compared
     with (written by anomaly_engine.py on every packet), how many readings it covers, and whether
     the models judge that sensor yet (they wait for 30 readings). {} until the engine has one."""
     db = await get_db()
@@ -622,9 +652,9 @@ async def reports_generate(req: ReportRequest, request: Request):
         rows = [dict(r) for r in await cur.fetchall()]
 
         # Node's current acceptable ranges, so the PDF charts can draw the
-        # same shaded band / dashed limit lines the live dashboard shows --
-        # not required for the report to work, so a missing row just means
-        # charts render without the band rather than failing the report.
+        # same dashed limit lines the live dashboard shows -- not required
+        # for the report to work, so a missing row just means charts render
+        # without them rather than failing the report.
         cur = await db.execute("SELECT * FROM system_thresholds WHERE node_id = ?", (req.node_id,))
         limits_row = await cur.fetchone()
         limits = dict(limits_row) if limits_row else {}
@@ -908,6 +938,52 @@ async def system_time_sync(body: ClientTime, request: Request):
     return {**result, "action": "set", "sync": _last_phone_sync}
 
 
+# --------------------------------------------------------------------------
+# Safe shutdown from the dashboard. Only the Pi's own screen (the kiosk, at localhost) may do it
+# unless WASTEWATER_ALLOW_REMOTE_SHUTDOWN=1 -- anyone who joins the hotspot can open the dashboard.
+# systemd then stops the engine and server cleanly (the database is committed as each reading
+# arrives) before the Pi powers off. Needs "sudo systemctl poweroff" without a password
+# (scripts/install_autostart.sh sets a rule).
+# --------------------------------------------------------------------------
+ALLOW_REMOTE_SHUTDOWN = os.environ.get("WASTEWATER_ALLOW_REMOTE_SHUTDOWN") == "1"
+SHUTDOWN_DELAY_S = 3            # time for the dashboard to show "shutting down" first
+
+
+def _from_this_pi(request: Request) -> bool:
+    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost")
+
+
+@app.get("/api/system/shutdown")
+async def system_shutdown_allowed(request: Request):
+    """Whether this browser may shut the Pi down, so the dashboard only shows the button where it works."""
+    return {"allowed": ALLOW_REMOTE_SHUTDOWN or _from_this_pi(request)}
+
+
+@app.post("/api/system/shutdown")
+async def system_shutdown(request: Request):
+    if not (ALLOW_REMOTE_SHUTDOWN or _from_this_pi(request)):
+        raise HTTPException(403, "Shut down only from the Pi's own screen")
+    check = await asyncio.to_thread(
+        subprocess.run, ["sudo", "-n", "-l", "/usr/bin/systemctl", "poweroff"], capture_output=True, text=True, timeout=10)
+    if check.returncode != 0:
+        raise HTTPException(500, "The server isn't allowed to shut the Pi down (see scripts/install_autostart.sh)")
+    print(f"Shutdown requested from the dashboard ({request.client.host}); powering off in {SHUTDOWN_DELAY_S} s", flush=True)
+    await manager.broadcast({"type": "shutdown"})
+
+    async def power_off():
+        await asyncio.sleep(SHUTDOWN_DELAY_S)
+        subprocess.run(["sudo", "-n", "/usr/bin/systemctl", "poweroff"])
+    asyncio.create_task(power_off())
+    return {"shutting_down": True, "in_seconds": SHUTDOWN_DELAY_S}
+
+
+@app.get("/api/dss/guide")
+async def dss_guide():
+    """Every condition the system can alert on, with its most common reasons, impact, actions and references
+    (the Alerts page's DSS Guide), straight from dss_rules.py."""
+    return dss_rules.guide_entries()
+
+
 class ReportDeleteRequest(BaseModel):
     filenames: list[str]
 
@@ -1040,8 +1116,7 @@ _CHART_FIELD_CFG = {
 
 def _render_chart_image(rows: list[dict], field: str, limits: dict, tz_offset: int = 0) -> "BytesIO":
     """One field's trend over the report window, matching the live
-    dashboard's visual language: shaded acceptable-range band, dashed
-    limit lines, red dots for real threshold_flags hits, purple dots for
+    dashboard's visual language: dashed limit lines, red dots for real threshold_flags hits, purple dots for
     real ml_flags hits -- not re-derived or simulated, the actual stored
     columns anomaly_engine.py wrote at ingest time."""
     from io import BytesIO
@@ -1057,9 +1132,6 @@ def _render_chart_image(rows: list[dict], field: str, limits: dict, tz_offset: i
     lo = limits.get(cfg["lo_key"]) if cfg["lo_key"] else None
     hi = limits.get(cfg["hi_key"])
     if lo is not None or hi is not None:
-        band_lo = lo if lo is not None else min(values)
-        band_hi = hi if hi is not None else max(values)
-        ax.axhspan(band_lo, band_hi, color="#16A34A", alpha=0.08)
         if lo is not None:
             ax.axhline(lo, color="#94A3B8", linestyle="--", linewidth=0.8)
         if hi is not None:
@@ -1193,7 +1265,7 @@ def _render_pdf(filepath: str, req: ReportRequest, node_label: str, summary: dic
     # ---- 2. Graphs --------------------------------------------------------------------------
     story.append(PageBreak())
     story.append(Paragraph("Graphs", h2))
-    story.append(Paragraph("Times in local time. Shaded band: acceptable range. Red dots: readings past a "
+    story.append(Paragraph("Times in local time. Dashed lines: acceptable range. Red dots: readings past a "
                            "threshold. Purple dots: readings the ML models flagged.", small))
     story.append(Spacer(1, 4))
     for field in ("ph", "turbidity", "temperature"):
@@ -1267,7 +1339,7 @@ def _render_pdf(filepath: str, req: ReportRequest, node_label: str, summary: dic
                     lines.append("<b>Similar situations:</b> " + " ".join(
                         cite(i, refs[i]) for i in dss["incidents"] if i in refs))
             alert_rows.append([Paragraph(_local(a["timestamp"], tz), cell), Paragraph(" · ".join(kind), cell),
-                               Paragraph(escape(a.get("title") or ""), cell), Paragraph("<br/>".join(lines), cell)])
+                               Paragraph(escape(alert_display_title(a)), cell), Paragraph("<br/>".join(lines), cell)])
         story.append(table(alert_rows, [0.95 * inch, 0.8 * inch, 1.55 * inch, 3.9 * inch]))
 
     # ---- 4. Tabled data (Full Audit) -----------------------------------------------------------

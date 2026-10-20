@@ -16,6 +16,7 @@ reports/
 # Anomaly-test data backup and change record (local only)
 testing/anomaly_test_backup.db
 testing/anomaly_test_manifest.json*
+testing/simulated_alerts.json
 
 # Editors / OS
 .vscode/

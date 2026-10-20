@@ -92,7 +92,7 @@ print("  PASS ", n, "| markers:", marked(conn))
 import json
 def diagnoses(conn):
     return [(r[0], r[1], json.loads(r[2])["rule"]) for r in conn.execute(
-        "SELECT severity, params, dss FROM notification_logs WHERE dss IS NOT NULL ORDER BY id")]
+        "SELECT severity, params, dss FROM notification_logs WHERE dss IS NOT NULL AND is_anomaly = 1 ORDER BY id")]
 
 def reading(conn, flags, ph=7.8, turb="20.0", temp="27.0"):
     clock[0] += 30
@@ -121,9 +121,17 @@ reading(conn, (), ph=6.2, turb="80.0")
 assert diagnoses(conn) == [], diagnoses(conn)
 print("  PASS  no diagnosis")
 
+print("K. threshold alerts carry guidance for exactly the limits crossed")
+conn = fresh()
+reading(conn, (), ph=6.2, turb="80.0")
+g = json.loads(conn.execute("SELECT dss FROM notification_logs WHERE is_threshold = 1").fetchone()[0])
+assert g["rule"] == "threshold:ph_low,turbidity_high", g["rule"]
+assert all(c["text"].startswith(("Low pH:", "High turbidity:")) for c in g["causes"]), g["causes"]
+print("  PASS ", g["rule"])
+
 print("J. DSS: every cited reference id exists and has a URL")
 import dss_rules
-for rule in list(dss_rules.RULES.values()) + list(dss_rules.SINGLE_RULES.values()):
+for rule in list(dss_rules.RULES.values()) + list(dss_rules.SINGLE_RULES.values()) + list(dss_rules.THRESHOLD_GUIDANCE.values()):
     for section in ("causes", "impact", "actions"):
         for item in rule[section]:
             assert item["refs"], ("uncited", item["text"])

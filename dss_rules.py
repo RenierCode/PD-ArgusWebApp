@@ -96,6 +96,13 @@ REFERENCES = {
         "kind": "regulation",
         "scope": "international",
     },
+    "efc_pumps": {
+        "title": "US Territories Wastewater Operator Training Series, Session 6: Collection Systems - Pumping & Force Mains",
+        "publisher": "Environmental Finance Center Network (cooperative agreement with U.S. EPA), 3 September 2025",
+        "url": "https://swefc.unm.edu/home/wp-content/uploads/2025/09/Collection-Systems-Pumps-and-Force-Mains-9-3-25.pdf",
+        "kind": "guide",
+        "scope": "international",
+    },
     "epa_ii": {
         "title": "Infiltration/Inflow: I/I Analysis and Project Certification",
         "publisher": "U.S. EPA (1985), Washington State Dept. of Ecology Publication 97-03",
@@ -294,6 +301,27 @@ SINGLE_RULES = {
 }
 
 SENSOR_LABEL = {"ph": "pH", "temperature": "temperature", "turbidity": "turbidity"}
+SENSOR_TAG = {"ph": "pH", "temperature": "Temperature", "turbidity": "Turbidity"}
+
+
+def _limit_note(sensor: str, value: float, limits: dict) -> str:
+    """Where the reading stands against the node's configured limits."""
+    lo, hi, unit = {"ph": (limits.get("min_ph"), limits.get("max_ph"), ""),
+                    "temperature": (limits.get("min_temp"), limits.get("max_temp"), " °C"),
+                    "turbidity": (None, limits.get("max_turbidity"), " NTU")}[sensor]
+    if lo is not None and value < lo:
+        return f"Below its {lo:.1f}{unit} limit."
+    if hi is not None and value > hi:
+        return f"Above its {hi:.1f}{unit} limit."
+    span = f"{lo:.1f}–{hi:.1f}{unit}" if lo is not None else f"≤ {hi:.1f}{unit}"
+    return f"Within its limits ({span})."
+
+
+def _evidence(sensors, readings: dict, flagged: dict, limits: dict) -> str:
+    """One line per sensor, tagged like the threshold alerts ("[ML Model - pH] ...") so the dashboard
+    and the PDF show each on its own line: the model's evidence, then the limit status."""
+    return " ".join(f"[ML Model - {SENSOR_TAG[s]}] {flagged[s]} {_limit_note(s, readings[s], limits)}"
+                    for s in sensors)
 
 
 def _directions(readings: dict, limits: dict) -> dict:
@@ -349,11 +377,7 @@ def diagnose(readings: dict, flagged: dict, limits: dict) -> list:
     for key, rule in RULES.items():
         if all(state.get(sensor) == direction for sensor, direction in rule["needs"].items()):
             sensors = list(rule["needs"])
-            limit_text = ", ".join(
-                f"{SENSOR_LABEL[s]} {readings[s]:g} ({'below' if rule['needs'][s] == 'low' else 'above'} its limit)"
-                for s in sensors)
-            summary = (f"The ML models flagged unusual readings on {len(sensors)} sensors at once, all past "
-                       f"their configured limits: {limit_text}.")
+            summary = _evidence(sensors, readings, flagged, limits)
             results.append((key, rule["title"], sensors, _package(key, rule, summary)))
             covered.update(sensors)
             break
@@ -361,6 +385,176 @@ def diagnose(readings: dict, flagged: dict, limits: dict) -> list:
     for sensor in ("ph", "temperature", "turbidity"):
         if sensor in flagged and sensor not in covered:
             rule = SINGLE_RULES[sensor]
-            summary = f"The ML model flagged an unusual {SENSOR_LABEL[sensor]} reading. {flagged[sensor]}"
+            summary = _evidence([sensor], readings, flagged, limits)
             results.append((f"single_{sensor}", rule["title"], [sensor], _package(f"single_{sensor}", rule, summary)))
     return results
+
+
+# --------------------------------------------------------------------------------------------------
+# Threshold alerts: the most common reasons and actions for exactly the limits that were crossed,
+# per sensor and direction (low pH gets low-pH guidance only, never high-pH). Same wording rules and
+# references as the ML diagnoses above.
+# --------------------------------------------------------------------------------------------------
+THRESHOLD_GUIDANCE = {
+    ("ph", "low"): {
+        "label": "Low pH", "stage": "Aeration basin",
+        "causes": [ACID_DISCHARGE, NITRIF_ALKALINITY],
+        "impact": [PH_PH, NITRIF_PH],
+        "actions": [CONFIRM, RAISE_PH, _item("Check influent pH and alkalinity.", "nydec"), TRACE_SOURCE],
+        "incidents": ["ct_acid"],
+    },
+    ("ph", "high"): {
+        "label": "High pH", "stage": "Aeration basin",
+        "causes": [_item("A caustic or alkaline discharge, such as cleaning chemicals from an industrial user; "
+                         "pretreatment rules set pH limits for industrial discharges.", "epa_ph")],
+        "impact": [PH_PH, NITRIF_PH],
+        "actions": [CONFIRM, _item("Trace the source in the collection system and check industrial users' pH "
+                                   "limits.", "epa_ph")],
+        "incidents": ["dannon"],
+    },
+    ("turbidity", "high"): {
+        "label": "High turbidity", "stage": "Chlorine contact tank",
+        "causes": [_item("Solids carrying over from the clarifier: hydraulic overload, poor settling, pin floc or "
+                         "dispersed growth.", "maine"), STORM_INFLOW],
+        "impact": [PH_SOLIDS, SS_SHIELD],
+        "actions": [_item("Check the clarifier: sludge blanket depth and a settling (settleometer) test of the "
+                          "mixed liquor.", "maine"), CUT_CLARIFIER_LOAD, CHECK_CHLORINE],
+        "incidents": ["ph_urc_llda", "ph_vitarich"],
+    },
+    ("temperature", "low"): {
+        "label": "Low temperature", "stage": "Aeration basin",
+        "causes": [STORM_INFLOW],
+        "impact": [PH_TEMP, NITRIF_COLD],
+        "actions": [LONGER_MCRT, _item("Check the collection system for wet-weather inflow/infiltration.", "epa_ii")],
+        "incidents": [],
+    },
+    ("temperature", "high"): {
+        "label": "High temperature", "stage": "Aeration basin",
+        "causes": [HOT_DISCHARGE],
+        "impact": [PH_TEMP, _item("Temperatures above 40 °C at the plant are not allowed without approval, because "
+                                  "heat can inhibit the biological process.", "epa_prohibitions")],
+        "actions": [_item("Check industrial users for hot discharges.", "epa_prohibitions")],
+        "incidents": [],
+    },
+    ("level", "low"): {
+        "label": "Low water level", "stage": "Tank / pump",
+        "causes": [_item("Water being pumped out faster than it comes in, until the level falls to the pump's "
+                         "low set point.", "efc_pumps"),
+                   _item("A level float or probe giving a false reading: floats can stick in grease and "
+                         "debris.", "efc_pumps")],
+        "impact": [_item("A pump should not be started or run dry: the water lubricates it, so running dry "
+                         "damages it.", "efc_pumps")],
+        "actions": [_item("Stop or lock out the pump until the level recovers, and confirm the low-level cut-off "
+                          "works.", "efc_pumps"),
+                    _item("Inspect and clean the level float or probe, and check the inlet for clogging.", "efc_pumps")],
+        "incidents": [],
+    },
+    ("level", "high"): {
+        "label": "High water level", "stage": "Tank / pump",
+        "causes": [_item("Inflow exceeding what is pumped out, for example a clogged suction or discharge pipe or "
+                         "a pump that has failed.", "efc_pumps"),
+                   STORM_INFLOW],
+        "impact": [_item("High-level alarms exist to prevent overflows: an overflowing tank spills untreated "
+                         "wastewater.", "efc_pumps"),
+                   _item("Discharging untreated wastewater into a water body is a prohibited act under the "
+                         "Clean Water Act.", "ph_ra_9275")],
+        "actions": [_item("Check the outlet pump and its controls, and clear clogged suction or discharge "
+                          "pipes.", "efc_pumps"),
+                    _item("Inspect the level float or probe for grease and debris.", "efc_pumps")],
+        "incidents": ["ph_roxol"],
+    },
+    ("flow", "high"): {
+        "label": "High flow", "stage": "Outflow",
+        "causes": [STORM_INFLOW, CLARIFIER_OVERLOAD],
+        "impact": [_item("Hydraulic overload pushes solids through the clarifier before they settle, raising "
+                         "effluent suspended solids.", "maine"), PH_SOLIDS],
+        "actions": [CUT_CLARIFIER_LOAD,
+                    _item("If this recurs in wet weather, study inflow/infiltration in the sewers.", "epa_ii")],
+        "incidents": ["ph_roxol"],
+    },
+}
+
+
+def _threshold_direction(param: str, value: float, limits: dict):
+    lo, hi = {"ph": ("min_ph", "max_ph"), "temperature": ("min_temp", "max_temp"), "turbidity": (None, "max_turbidity"),
+              "level": ("min_level", "max_level"), "flow": (None, "max_flow")}[param]
+    if lo and limits.get(lo) is not None and value < limits[lo]:
+        return "low"
+    if hi and limits.get(hi) is not None and value > limits[hi]:
+        return "high"
+    return None
+
+
+def threshold_guidance(readings: dict, limits: dict, params) -> dict | None:
+    """DSS guidance for a threshold alert: only the crossed limits, each sensor in its own direction.
+    readings: ph, temperature, turbidity, level, flow. params: the alert's crossed parameters."""
+    picked = []
+    for param in dict.fromkeys(params):
+        direction = _threshold_direction(param, readings[param], limits)
+        if (param, direction) in THRESHOLD_GUIDANCE:
+            picked.append(THRESHOLD_GUIDANCE[(param, direction)])
+    if not picked:
+        return None
+
+    def merged(section):
+        # Each statement once; with several conditions, prefixed with the one it is about
+        out, seen = [], set()
+        for g in picked:
+            for item in g[section]:
+                text = f"{g['label']}: {item['text']}" if len(picked) > 1 else item["text"]
+                if text not in seen:
+                    seen.add(text)
+                    out.append({"text": text, "refs": item["refs"]})
+        return out
+
+    rule = {"causes": merged("causes"), "impact": merged("impact"), "actions": merged("actions"),
+            "incidents": list(dict.fromkeys(i for g in picked for i in g["incidents"]))}
+    ref_ids = {r for sec in ("causes", "impact", "actions") for item in rule[sec] for r in item["refs"]}
+    ref_ids.update(rule["incidents"])
+    return {
+        "rule": "threshold:" + ",".join(f"{p}_{_threshold_direction(p, readings[p], limits)}" for p in dict.fromkeys(params)),
+        "severity": None,
+        "category": "THRESHOLD",
+        "stage": " + ".join(dict.fromkeys(g["stage"] for g in picked)),
+        "summary": "",
+        **rule,
+        "references": {r: REFERENCES[r] for r in sorted(ref_ids)},
+    }
+
+
+# --------------------------------------------------------------------------------------------------
+# The DSS Guide (Alerts page): every condition the system can alert on, from the same rules the
+# alerts use, so the guide and the alerts never disagree.
+# --------------------------------------------------------------------------------------------------
+_PARAM_NAME = {"ph": "pH", "temperature": "temperature", "turbidity": "turbidity", "level": "water level", "flow": "flow"}
+_NEED_TEXT = {"low": "below its lower limit", "high": "above its upper limit"}
+
+
+def _guide_entry(group, name, trigger, rule, sensors, severity=None):
+    ref_ids = {r for sec in ("causes", "impact", "actions") for item in rule[sec] for r in item["refs"]}
+    ref_ids.update(rule["incidents"])
+    return {
+        "group": group, "name": name, "trigger": trigger, "severity": severity, "stage": rule["stage"],
+        "sensors": list(sensors),           # for the guide's sensor buttons
+        "causes": rule["causes"], "impact": rule["impact"], "actions": rule["actions"],
+        "incidents": rule["incidents"], "references": {r: REFERENCES[r] for r in sorted(ref_ids)},
+    }
+
+
+def guide_entries() -> list:
+    entries = [
+        _guide_entry("Threshold limits", g["label"],
+                     f"The {_PARAM_NAME[param]} reading is {_NEED_TEXT[direction]}.", g, [param])
+        for (param, direction), g in THRESHOLD_GUIDANCE.items()
+    ]
+    for rule in RULES.values():
+        parts = [f"{_PARAM_NAME[s]} {_NEED_TEXT[d]}" for s, d in rule["needs"].items()]
+        entries.append(_guide_entry(
+            "ML diagnoses", rule["title"],
+            f"The ML models flag these at the same moment: {'; '.join(parts)}.", rule, rule["needs"], rule["severity"]))
+    for sensor, rule in SINGLE_RULES.items():
+        entries.append(_guide_entry(
+            "ML diagnoses", rule["title"],
+            f"The ML model flags an unusual {_PARAM_NAME[sensor]} change that no combined diagnosis explains.",
+            rule, [sensor], rule["severity"]))
+    return entries

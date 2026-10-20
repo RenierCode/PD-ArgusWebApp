@@ -46,6 +46,12 @@ export default function App() {
     }).catch(() => {})
   }, [nodeContext])
 
+  // With a single node the sidebar hides the node selector, so never leave the dashboard on the
+  // All Nodes overview with no way back
+  useEffect(() => {
+    if (nodes.length === 1 && nodeContext === 'all') setNodeContext(String(nodes[0].node_id))
+  }, [nodes, nodeContext])
+
   const refreshThresholds = useCallback(() => {
     api.thresholdsGet().then((rows) => {
       setThresholdsByNode(Object.fromEntries(rows.map((r) => [String(r.node_id), r])))
@@ -173,7 +179,7 @@ export default function App() {
           </div>
         )}
         {view === 'dashboard' && (
-          <Dashboard nodeContext={nodeContext} nodes={nodes} liveByNode={liveByNode}
+          <Dashboard nodeContext={nodeContext} nodes={nodes} liveByNode={liveByNode} onOpenNode={setNodeContext}
             thresholdsByNode={thresholdsByNode} nodeStatus={nodeStatus} onExpandedChange={setChartExpanded} />
         )}
         {view === 'notifications' && <Notifications nodes={nodes} focus={focusAlert} />}

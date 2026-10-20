@@ -3,6 +3,7 @@ import NotificationCard from '../components/NotificationCard.jsx'
 import Pagination from '../components/Pagination.jsx'
 import { MARK_COLORS } from '../components/TelemetryChart.jsx'
 import { useNotifications } from '../hooks/useNotifications.js'
+import DssGuide from '../components/DssGuide.jsx'
 import { formatDbTime } from '../time.js'
 
 const TYPE_OPTIONS = [
@@ -26,6 +27,7 @@ const SELECT = 'p-2 border border-border rounded-md text-sm bg-white'
 export default function Notifications({ nodes, focus }) {
   const [nodeFilter, setNodeFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [guideOpen, setGuideOpen] = useState(false)   // the DSS Guide window
   const [paramFilter, setParamFilter] = useState('')
   const [highlightId, setHighlightId] = useState(null)
   const [seenFocus, setSeenFocus] = useState(null)
@@ -83,7 +85,13 @@ export default function Notifications({ nodes, focus }) {
     <div>
       {/* Header counts follow the node + parameter filters; the list also follows the type filter */}
       <div className="flex flex-wrap justify-between items-center gap-3 bg-white border border-border rounded-lg px-5 py-3.5 mb-4">
-        <div className="font-bold text-accentDeep text-base">Decision Support System</div>
+        <div className="flex items-center gap-3">
+          <div className="font-bold text-accentDeep text-base">Decision Support System</div>
+          <button type="button" onClick={() => setGuideOpen(true)}
+            className="px-3 py-1 border border-accentDeep text-accentDeep rounded-md text-xs hover:bg-accentDeep hover:text-white">
+            DSS Guide
+          </button>
+        </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-dark2">
           <div>Active: <b className="text-dark">{counts?.active ?? '—'}</b></div>
           <div>
@@ -131,6 +139,7 @@ export default function Notifications({ nodes, focus }) {
       </div>
 
       <Pagination page={page} pages={pages} total={total} pageSize={pageSize} onChange={goToPage} />
+      {guideOpen && <DssGuide onClose={() => setGuideOpen(false)} />}
     </div>
   )
 }
