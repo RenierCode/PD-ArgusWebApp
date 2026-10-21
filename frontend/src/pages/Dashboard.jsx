@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { TankGauge, TachoGauge } from '../components/Gauges.jsx'
 import TelemetryChart, { MarkSwatch } from '../components/TelemetryChart.jsx'
 import { api } from '../api.js'
-import { formatDuration, localDateToDb } from '../time.js'
+import { formatDuration, localDateToDb, parseDbTime } from '../time.js'
 import { useIsMobile } from '../hooks/useIsMobile.js'
 
 export default function Dashboard({ nodeContext, nodes, liveByNode, thresholdsByNode, nodeStatus, onExpandedChange, onOpenNode }) {
@@ -72,7 +72,11 @@ function NodeDashboard({ nodeId, nodes, live, limits, status, onExpandedChange }
   // Only the most recent N points are actually drawn inline -- `history`
   // itself stays larger so the volume total above still reflects the full
   // fetched window, not just what's visible on the small chart.
-  const inlineRows = history.slice(-MAX_INLINE_POINTS)
+  // The hour leading up to the NEWEST reading (not up to page load): when the page opened during a
+  // gap and fell back to older readings, those drop out as soon as fresh ones arrive, instead of
+  // stretching the chart from yesterday to today
+  const newest = history.length ? parseDbTime(history[history.length - 1].timestamp) : 0
+  const inlineRows = history.filter((r) => parseDbTime(r.timestamp) >= newest - 3600 * 1000).slice(-MAX_INLINE_POINTS)
 
   if (!latest || !limits) {
     return <div className="text-dark2 text-sm">Waiting for telemetry from node {nodeId}…</div>
