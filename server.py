@@ -1529,12 +1529,10 @@ async def admin_nodes_put(node: NodeUpsert):
         await db.close()
 
 
-# A node is "online" if we've heard from it more recently than this. LoRa
-# nodes here transmit roughly once a minute (see edge_engine.py's
-# TX_INTERVAL_ASSUMED_MIN) -- 2.5x that gives room for one missed/retried
-# packet before flipping to offline, without being so generous that a truly
-# dead node still shows green for many minutes.
-NODE_STALE_SECONDS = 150
+# A node is "online" if we've heard from it more recently than this. The node sends every 15 s, so
+# 60 s is ~4 missed readings in a row -- enough to ride out a lost or resent LoRa packet without the
+# status flickering, while a node that has really stopped shows offline within a minute.
+NODE_STALE_SECONDS = 60
 
 
 @app.get("/api/nodes/status")

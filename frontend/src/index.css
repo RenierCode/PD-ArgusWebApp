@@ -170,3 +170,10 @@ button, select, input {
 .grid > * {
   min-width: 0;
 }
+
+/* The page itself never scrolls sideways (the kiosk is a touch screen); wide content such as the
+   Historical Logs table scrolls inside its own box instead */
+html,
+body {
+  overflow-x: hidden;
+}

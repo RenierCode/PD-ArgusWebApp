@@ -24,7 +24,7 @@ export default function ShutdownButton({ collapsed }) {
       {allowed && (
         <button type="button" onClick={() => setConfirming(true)} aria-label="Shut down the Raspberry Pi"
           data-tooltip={collapsed ? 'Shut down' : undefined}
-          className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-red-300 hover:bg-red-900/40">
+          className="relative flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-red-300 hover:bg-red-900/40">
           <Power size={18} className="flex-shrink-0" />
           {!collapsed && <span>Shut down</span>}
         </button>
